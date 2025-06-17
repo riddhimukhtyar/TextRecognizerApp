@@ -1,0 +1,137 @@
+package com.example.textrecognizerapp
+
+import android.content.Intent
+import android.graphics.*
+import android.graphics.drawable.BitmapDrawable
+import android.os.Bundle
+import android.provider.MediaStore
+import android.view.MotionEvent
+import android.view.ScaleGestureDetector
+import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
+import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.FileProvider
+import com.example.textrecognizerapp.databinding.ActivityNotesBinding
+import java.io.File
+import java.io.FileOutputStream
+
+class Notes : AppCompatActivity() {
+
+    private lateinit var binding: ActivityNotesBinding
+    private var backgroundColor = Color.BLACK // Default background color
+    private var scaleGestureDetector: ScaleGestureDetector? = null
+    private var scaleFactor = 1.0f
+    private var textX = 400f // Initial X position
+    private var textY = 300f // Initial Y position
+    private var paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        textSize = 32f
+        typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        binding = ActivityNotesBinding.inflate(layoutInflater)
+        setContentView(binding.root)
+
+        setupListeners()
+        scaleGestureDetector = ScaleGestureDetector(this, ScaleListener())
+    }
+
+    private fun setupListeners() {
+        with(binding) {
+            close.setOnClickListener { finish() }
+            ConvertButton.setOnClickListener { showColorPickerDialog() }
+            share.setOnClickListener { shareImage() }
+            save.setOnClickListener { saveImageToGallery() }
+            previewImage.setOnTouchListener { _, event -> onTouch(event) }
+        }
+    }
+
+    private fun onTouch(event: MotionEvent): Boolean {
+        scaleGestureDetector?.onTouchEvent(event) ?: return false
+
+        when (event.action) {
+            MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> {
+                textX = event.x
+                textY = event.y
+                convertTextToImage()
+            }
+        }
+        return true
+    }
+
+    private inner class ScaleListener : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+        override fun onScale(detector: ScaleGestureDetector): Boolean {
+            scaleFactor *= detector.scaleFactor
+            scaleFactor = 0.1f.coerceAtLeast(scaleFactor.coerceAtMost(10.0f))
+            paint.textSize = 32f * scaleFactor
+            convertTextToImage()
+            return true
+        }
+    }
+
+    private fun showColorPickerDialog() {
+        val colors = arrayOf("Black", "Red", "Blue", "Magenta")
+        val colorValues = arrayOf(Color.BLACK, Color.RED, Color.BLUE, Color.MAGENTA)
+        AlertDialog.Builder(this)
+            .setTitle("Choose Background Color")
+            .setItems(colors) { _, which ->
+                backgroundColor = colorValues[which]
+                convertTextToImage()
+            }
+            .show()
+    }
+
+    private fun convertTextToImage() {
+        val text = binding.textInput.text.toString().trim()
+        if (text.isEmpty()) {
+            Toast.makeText(this, "Please enter some text.", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val bitmap = Bitmap.createBitmap(800, 600, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        canvas.drawColor(backgroundColor)
+        canvas.drawText(text, textX - paint.measureText(text) / 2, textY + paint.textSize / 2, paint)
+        binding.previewImage.setImageBitmap(bitmap)
+    }
+
+    private fun shareImage() {
+        binding.previewImage.isDrawingCacheEnabled = true
+        val bitmap = Bitmap.createBitmap(binding.previewImage.drawingCache)
+        binding.previewImage.isDrawingCacheEnabled = false
+        try {
+            val file = File(externalCacheDir, "shared_image.png")
+            FileOutputStream(file).use { out ->
+                bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+            }
+            val uri = FileProvider.getUriForFile(this, "${applicationContext.packageName}.provider", file)
+            val intent = Intent(Intent.ACTION_SEND).apply {
+                putExtra(Intent.EXTRA_STREAM, uri)
+                type = "image/png"
+                flags = Intent.FLAG_GRANT_READ_URI_PERMISSION
+            }
+            startActivity(Intent.createChooser(intent, "Share image via"))
+        } catch (e: Exception) {
+            Toast.makeText(this, "Error sharing image", Toast.LENGTH_SHORT).show()
+            e.printStackTrace()
+        }
+    }
+
+    private fun saveImageToGallery() {
+        val bitmap = (binding.previewImage.drawable as BitmapDrawable).bitmap
+        val savedImageURL = MediaStore.Images.Media.insertImage(
+            contentResolver,
+            bitmap,
+            "TextToImage_${System.currentTimeMillis()}",
+            "Image generated by Text Recognizer App"
+        )
+
+        if (savedImageURL.isNullOrEmpty()) {
+            Toast.makeText(this, "Failed to save image", Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(this, "Image saved successfully", Toast.LENGTH_SHORT).show()
+        }
+    }
+}
